@@ -1,3 +1,14 @@
+<img width="1485" height="862" alt="Screenshot 2026-09-15 at 23 43 58" src="https://github.com/user-attachments/assets/ead8d632-4f63-4628-b9be-bbd71594f2e3" />
+
+
+
+
+
+
+
+
+
+
 # ASUS Router RT-AX86U Pro Monitoring
 
 Complete monitoring solution for ASUS RT-AX86U Pro router using Telegraf, InfluxDB, and Grafana.
