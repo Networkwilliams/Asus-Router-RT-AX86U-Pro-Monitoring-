@@ -1,198 +1,330 @@
-# BMW Connected Drive Grafana Dashboard
+# ASUS Router RT-AX86U Pro Monitoring
 
-A Python-based API server that fetches vehicle data from BMW ConnectedDrive and exposes it for visualization in Grafana.
+Complete monitoring solution for ASUS RT-AX86U Pro router using Telegraf, InfluxDB, and Grafana.
 
-## Features
+## Overview
 
-- Real-time BMW vehicle data integration via `bimmer_connected` library
-- RESTful API endpoint for Grafana JSON datasource
-- Automatic data caching and periodic updates (every 5 minutes)
-- Docker support for easy deployment
-- Mock API servers for testing without BMW credentials
-- Pre-configured Grafana dashboard
+This project provides real-time monitoring of your ASUS router including:
+- CPU and Memory usage
+- WAN connection status and traffic
+- Wireless clients (2.4GHz and 5GHz)
+- Connected devices (wired/wireless breakdown)
+- Wireless signal quality (noise floor, link rate, transmit power)
+- Disk usage (JFFS, USB drive)
+- Network interface statistics
+- System uptime and load
 
-## Vehicle Data Exposed
+## Architecture
 
-- **Vehicle Information**: Name, VIN, Model
-- **Mileage**: Current odometer reading
-- **Fuel Status**: Fuel percentage and range
-- **Battery Status**: Battery percentage and electric range (for hybrid/electric vehicles)
-- **Location**: GPS coordinates
-- **Door Lock State**: Locked/unlocked status
-- **Climate**: Climate control status
-- **Charging Status**: Current charging state (for electric/hybrid vehicles)
+```
+ASUS Router (RT-AX86U Pro)
+    ↓
+  Telegraf (collects metrics every 10s)
+    ↓
+  InfluxDB (stores time-series data)
+    ↓
+  Grafana (visualizes data)
+```
 
 ## Prerequisites
 
-- Python 3.11+
-- BMW ConnectedDrive account
-- Grafana instance with JSON API plugin
-- Docker (optional, for containerized deployment)
+- ASUS RT-AX86U Pro router with Merlin firmware
+- SSH access enabled on the router
+- USB drive plugged into the router (for entware/Telegraf installation)
+- InfluxDB v2.x instance
+- Grafana instance
+- Network connectivity between router and InfluxDB
 
 ## Installation
 
-### Option 1: Direct Python Installation
+### Step 1: Router Setup
 
-```bash
-# Install required Python package
-pip install bimmer_connected
+1. **Enable SSH on your router:**
+   - Go to router admin panel → Administration → System
+   - Enable SSH service
+   - Set SSH port (default: 22)
 
-# Configure credentials in bmw_api.py
-# Edit lines 11-12 to add your BMW username and password
-BMW_USERNAME = "your-username"
-BMW_PASSWORD = "your-password"
+2. **Plug in a USB drive** to the router (for entware installation)
 
-# Run the API server
-python3 bmw_api.py
-```
+3. **SSH into the router:**
+   ```bash
+   ssh admin@192.168.0.1
+   ```
 
-### Option 2: Docker Installation
+4. **Run the setup script:**
+   ```bash
+   # Download and run the router setup script
+   # This will install entware and Telegraf
+   curl -O https://raw.githubusercontent.com/Networkwilliams/Asus-Router-RT-AX86U-Pro-Monitoring-/main/router-setup.sh
+   chmod +x router-setup.sh
+   ./router-setup.sh
+   ```
 
-```bash
-# Build the Docker image
-docker build -f Dockerfile.bmw -t bmw-api .
+### Step 2: Configure Telegraf
 
-# Run the container
-docker run -d -p 8898:8898 \
-  -e BMW_USERNAME="your-username" \
-  -e BMW_PASSWORD="your-password" \
-  bmw-api
-```
+1. **Copy the Telegraf configuration to the router:**
+   ```bash
+   # On your local machine
+   scp telegraf-router.conf admin@192.168.0.1:/opt/etc/telegraf.conf
+   ```
 
-## Configuration
+2. **Edit the configuration on the router:**
+   ```bash
+   # SSH into router
+   ssh admin@192.168.0.1
 
-Edit `bmw_api.py` and configure your BMW credentials:
+   # Edit the config
+   nano /opt/etc/telegraf.conf
+   ```
 
-```python
-BMW_USERNAME = "your-username"  # Your BMW ConnectedDrive username
-BMW_PASSWORD = "your-password"  # Your BMW ConnectedDrive password
-BMW_REGION = Regions.REST_OF_WORLD  # Change if needed (Regions.NORTH_AMERICA, etc.)
-```
+3. **Update these values:**
+   - Line 24: `urls` - Your InfluxDB URL (default: `http://192.168.0.200:8086`)
+   - Line 25: `token` - Your InfluxDB API token
+   - Line 26: `organization` - Your InfluxDB organization name
+   - Line 27: `bucket` - Your InfluxDB bucket name (default: `router`)
 
-## Usage
+### Step 3: Install Custom Metrics Scripts
 
-### Running the Real API
+1. **Create scripts directory:**
+   ```bash
+   mkdir -p /opt/scripts
+   ```
 
-```bash
-python3 bmw_api.py
-```
+2. **Copy the custom scripts to the router:**
+   ```bash
+   # From your local machine
+   scp wireless_stats.sh admin@192.168.0.1:/opt/scripts/
+   scp client_stats.sh admin@192.168.0.1:/opt/scripts/
+   scp wan_stats.sh admin@192.168.0.1:/opt/scripts/
+   ```
 
-The API will:
-1. Fetch initial BMW vehicle data
-2. Start HTTP server on port 8898
-3. Update data every 5 minutes automatically
+3. **Make scripts executable:**
+   ```bash
+   # On the router
+   chmod +x /opt/scripts/*.sh
 
-Access the API at: `http://localhost:8898`
+   # Fix line endings and remove leading spaces from shebang
+   sed -i 's/\r$//' /opt/scripts/*.sh
+   sed -i '1s/^[[:space:]]*//' /opt/scripts/*.sh
+   ```
 
-### Running Mock API (for Testing)
+### Step 4: Test Telegraf
 
-For testing without BMW credentials:
+1. **Test the configuration:**
+   ```bash
+   /opt/bin/telegraf --config /opt/etc/telegraf.conf --test
+   ```
 
-```bash
-# Mock API with kilometers
-python3 bmw_mock_api.py
+2. **Start Telegraf:**
+   ```bash
+   /opt/bin/telegraf --config /opt/etc/telegraf.conf > /tmp/telegraf.log 2>&1 &
+   ```
 
-# Mock API with miles
-python3 bmw_mock_api_miles.py
-```
+3. **Check if it's running:**
+   ```bash
+   ps | grep telegraf
+   tail -f /tmp/telegraf.log
+   ```
 
-Both mock servers run on port 8898 and return sample vehicle data.
+### Step 5: Setup Auto-Start on Reboot
 
-## Grafana Setup
+1. **Create startup script:**
+   ```bash
+   mkdir -p /jffs/scripts
 
-### 1. Install JSON API Plugin
+   cat > /jffs/scripts/services-start << 'EOF'
+   #!/bin/sh
 
-```bash
-grafana-cli plugins install simpod-json-datasource
-```
+   # Wait for system to be ready
+   sleep 30
 
-### 2. Add Data Source
+   # Start Telegraf
+   logger -t "telegraf-startup" "Starting Telegraf"
+   /opt/bin/telegraf --config /opt/etc/telegraf.conf > /tmp/telegraf.log 2>&1 &
 
-1. Navigate to Configuration → Data Sources
-2. Add new "JSON API" datasource
-3. Set URL to: `http://localhost:8898` (or your server address)
-4. Save & Test
+   logger -t "telegraf-startup" "Telegraf started with PID $!"
+   EOF
 
-### 3. Import Dashboard
+   chmod +x /jffs/scripts/services-start
+   ```
 
-1. Navigate to Dashboards → Import
-2. Upload `bmw-dashboard.json`
-3. Select your JSON API datasource
-4. Import
+### Step 6: Setup InfluxDB
 
-## BMW ConnectedDrive Authentication
+1. **Create a bucket in InfluxDB:**
+   - Login to InfluxDB UI (http://your-influxdb:8086)
+   - Go to **Load Data** → **Buckets**
+   - Create a new bucket named `router`
 
-BMW ConnectedDrive uses hCaptcha for authentication. If you encounter authentication issues, use the `bmw_captcha_helper.py` script for guidance on obtaining the hCaptcha token.
+2. **Generate an API token:**
+   - Go to **Load Data** → **API Tokens**
+   - Click **Generate API Token** → **All Access API Token**
+   - Copy the token for use in Telegraf config
 
-```bash
-python3 bmw_captcha_helper.py
-```
+### Step 7: Setup Grafana Dashboard
 
-Follow the displayed instructions to extract the hCaptcha token from your browser's developer tools.
+1. **Add InfluxDB as a data source in Grafana:**
+   - Go to **☰ Menu** → **Connections** → **Data Sources**
+   - Click **Add data source** → Select **InfluxDB**
+   - Configure:
+     - **Name:** `influxdb` (must match this exactly)
+     - **Query Language:** `Flux`
+     - **URL:** `http://your-influxdb:8086`
+     - **Organization:** Your InfluxDB org name
+     - **Token:** Your InfluxDB API token
+     - **Default Bucket:** `router`
+   - Click **Save & Test**
 
-## API Response Format
+2. **Import the dashboard:**
+   - Go to **☰ Menu** → **Dashboards** → **New** → **Import**
+   - Upload `router-grafana-dashboard.json`
+   - Click **Import**
 
-```json
-{
-  "status": "success",
-  "vehicles": [
-    {
-      "name": "My BMW",
-      "vin": "WBA1234567890",
-      "model": "COMBUSTION",
-      "mileage": 45678,
-      "mileage_unit": "km",
-      "fuel_percent": 67,
-      "fuel_range": 420,
-      "fuel_range_unit": "km",
-      "battery_percent": 85,
-      "electric_range": 45,
-      "electric_range_unit": "km",
-      "latitude": 51.5074,
-      "longitude": -0.1278,
-      "door_lock_state": "LOCKED",
-      "climate_on": false,
-      "charging_status": "NOT_CHARGING",
-      "last_updated": "2024-02-27T01:23:45"
-    }
-  ],
-  "timestamp": 1709001825.123
-}
-```
+## Dashboard Panels
+
+The Grafana dashboard includes:
+
+### Status Panels (Top Row)
+- **WAN Status** - Connection status (1=connected, 0=disconnected)
+- **Total Clients** - Number of connected devices
+- **Wireless Clients** - Number of WiFi devices
+- **System Uptime** - Router uptime in seconds
+
+### Time Series Graphs
+- **CPU Usage** - Real-time CPU utilization (%)
+- **Memory Usage** - RAM usage percentage
+- **WAN Traffic** - Upload/download bandwidth on eth0
+- **Connected Clients** - Timeline of all client types
+- **Wireless Clients by Band** - 2.4GHz vs 5GHz client count
+- **Wireless Noise Floor** - Signal quality (dBm)
+- **Wireless Link Rate** - Connection speeds (Mbps)
+
+### Gauges
+- **Disk Usage** - Storage usage for JFFS, USB drive, and data partitions
+
+## Custom Metrics Scripts
+
+### wireless_stats.sh
+Collects wireless metrics for both 2.4GHz and 5GHz bands:
+- Connected clients count
+- Noise floor (dBm)
+- Channel number
+- Link rate (Mbps)
+- Transmit power (dBm)
+
+### client_stats.sh
+Counts connected devices:
+- Total clients
+- Wireless clients
+- Wired clients
+- 2.4GHz clients
+- 5GHz clients
+
+### wan_stats.sh
+Monitors WAN connection:
+- Connection status
+- WAN IP address
+- Gateway address
+- Uptime
 
 ## Troubleshooting
 
-### Authentication Failed
+### Telegraf won't start
+1. Check logs: `tail -f /tmp/telegraf.log`
+2. Verify config syntax: `/opt/bin/telegraf --config /opt/etc/telegraf.conf --test`
+3. Check InfluxDB connectivity: `curl http://your-influxdb:8086/health`
 
-- Verify your BMW ConnectedDrive credentials
-- Check if your account has access to BMW ConnectedDrive services
-- Try the captcha helper script for token generation
+### Custom scripts timing out
+If you see timeout errors for `client_stats.sh`:
+1. Edit `/opt/etc/telegraf.conf`
+2. Increase timeout from `5s` to `10s` in the exec plugin sections
 
-### No Data Returned
+### No data in Grafana
+1. Verify data in InfluxDB:
+   - Go to InfluxDB UI → Data Explorer
+   - Select bucket `router`
+   - Check for measurements (cpu, mem, wan, wireless, clients)
+2. Test queries in Grafana Explore
+3. Check data source configuration
+4. Verify time range in dashboard (try "Last 15 minutes")
 
-- Ensure your BMW vehicle is connected to ConnectedDrive
-- Check that your vehicle's data is visible in the official BMW app
-- Review API server logs for errors
+### Script formatting issues
+If scripts have "exec format error":
+```bash
+# Fix line endings and shebang
+sed -i 's/\r$//' /opt/scripts/*.sh
+sed -i '1s/^[[:space:]]*//' /opt/scripts/*.sh
+chmod +x /opt/scripts/*.sh
+```
 
-### Connection Timeout
+## Configuration Files
 
-- Increase the cache update interval in `bmw_api.py` (line 100)
-- Check your network connection
-- Verify BMW ConnectedDrive service status
+- **telegraf-router.conf** - Main Telegraf configuration
+- **router-setup.sh** - Initial router setup script
+- **wireless_stats.sh** - Wireless metrics collection
+- **client_stats.sh** - Client counting script
+- **wan_stats.sh** - WAN status monitoring
+- **router-grafana-dashboard.json** - Pre-built Grafana dashboard
 
-## File Structure
+## Metrics Collected
 
-- `bmw_api.py` - Main API server with BMW ConnectedDrive integration
-- `bmw_mock_api.py` - Mock API server (kilometers)
-- `bmw_mock_api_miles.py` - Mock API server (miles)
-- `bmw_captcha_helper.py` - Helper script for authentication
-- `bmw-dashboard.json` - Grafana dashboard configuration
-- `Dockerfile.bmw` - Docker container configuration
+### Standard Metrics (via Telegraf plugins)
+- `cpu` - CPU usage per core and total
+- `mem` - Memory usage
+- `disk` - Disk usage and free space
+- `diskio` - Disk I/O statistics
+- `net` - Network interface statistics
+- `netstat` - TCP/UDP connection stats
+- `processes` - Process counts
+- `kernel` - Kernel statistics
+- `system` - System load and uptime
 
-## License
+### Custom Metrics (via exec scripts)
+- `wireless` - WiFi metrics per band
+- `clients` - Connected device counts
+- `wan` - WAN connection status
 
-This project is provided as-is for personal use with BMW ConnectedDrive services.
+## Performance Impact
+
+- **CPU Usage:** ~1-2% additional load
+- **Memory:** ~10-15MB for Telegraf
+- **Network:** ~5-10KB/s upload to InfluxDB
+- **Disk:** ~1-2MB for Telegraf binary + scripts
+
+## Requirements
+
+- ASUS RT-AX86U Pro (or compatible ASUS router with Merlin firmware)
+- Merlin firmware version 386.x or newer
+- Minimum 128MB free RAM
+- USB storage device (any size, for entware)
+- InfluxDB 2.x
+- Grafana 9.x or newer
+
+## Security Considerations
+
+1. **SSH Access:** Use strong passwords or SSH keys
+2. **InfluxDB Token:** Keep your API token secure
+3. **Network Access:** Ensure InfluxDB is not exposed to the internet
+4. **Firewall:** Consider restricting InfluxDB access to specific IPs
 
 ## Credits
 
-Built using the excellent [bimmer_connected](https://github.com/bimmerconnected/bimmer_connected) library.
+- Telegraf by InfluxData
+- InfluxDB by InfluxData
+- Grafana by Grafana Labs
+- Entware for routers
+
+## License
+
+MIT License - Feel free to use and modify as needed.
+
+## Support
+
+For issues, questions, or contributions, please open an issue on GitHub.
+
+## Version History
+
+- **v1.0.0** (2026-09-15) - Initial release
+  - Basic monitoring setup
+  - Custom metrics scripts
+  - Pre-built Grafana dashboard
+  - Auto-start on reboot

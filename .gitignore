@@ -1,0 +1,26 @@
+# OS Files
+.DS_Store
+.localized
+
+# Private/Sensitive Files
+*.pem
+*.pdf
+*.xlsx
+secrets-policy.json
+claude.json
+
+# Other Projects
+IPAM-Project-Summary.md
+add_100_accounts.py
+cloudwatch-*.json
+ec2-user-data.sh
+finish-cleanup.sh
+install-cloudwatch-agent.sh
+ipam-architecture.drawio
+randomize_ipam_data.py
+restore_and_randomize_ipam.py
+setup_ipam_db.py
+game/
+
+# Logs
+*.log
